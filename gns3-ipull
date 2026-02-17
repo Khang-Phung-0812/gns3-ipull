@@ -1,0 +1,449 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION="0.1.0"
+STATE_DIR="${STATE_DIR:-/var/lib/gns3-ipull}"
+INDEX_CACHE="${INDEX_CACHE:-/tmp/gns3-ipull-labhub.json}"
+LAST_MIRROR_FILE="$STATE_DIR/last_mirror"
+REPO_URL="${REPO_URL:-https://api.github.com/repos/ishare2-org/mirrors/releases/latest}"
+
+# GNS3 v1 type mapping
+QEMU_DIR="${QEMU_DIR:-/opt/gns3/images/QEMU}"
+IOU_DIR="${IOU_DIR:-/opt/gns3/images/IOU}"
+IOS_DIR="${IOS_DIR:-/opt/gns3/images/IOS}"
+
+RED='\033[31m'
+YELLOW='\033[1;33m'
+GREEN='\033[32m'
+BLUE='\033[34m'
+NO_COLOR='\033[0m'
+
+log() { echo -e "$*"; }
+err() { echo -e "${RED}[-] $*${NO_COLOR}" >&2; }
+warn() { echo -e "${YELLOW}[!] $*${NO_COLOR}"; }
+ok() { echo -e "${GREEN}[+] $*${NO_COLOR}"; }
+
+require_cmd() {
+    local name="$1"
+    if ! command -v "$name" >/dev/null 2>&1; then
+        err "Missing dependency: $name"
+        exit 1
+    fi
+}
+
+require_root() {
+    if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+        err "This command requires root."
+        exit 1
+    fi
+}
+
+normalize_type() {
+    local t="${1,,}"
+    case "$t" in
+    qemu) echo "QEMU" ;;
+    iou | iol | bin) echo "IOL" ;;
+    dynamips | ios) echo "DYNAMIPS" ;;
+    all) echo "ALL" ;;
+    *) echo "" ;;
+    esac
+}
+
+install_dir_for_type() {
+    local type="$1"
+    case "$type" in
+    QEMU) echo "$QEMU_DIR" ;;
+    IOL) echo "$IOU_DIR" ;;
+    DYNAMIPS) echo "$IOS_DIR" ;;
+    *)
+        err "Unsupported type: $type"
+        exit 1
+        ;;
+    esac
+}
+
+fetch_index() {
+    require_cmd curl
+    require_cmd jq
+
+    local response
+    local labhub_url
+
+    response="$(curl -fsSL "$REPO_URL")" || {
+        err "Failed to fetch release metadata from: $REPO_URL"
+        exit 1
+    }
+
+    labhub_url="$(echo "$response" | jq -r '.assets[] | select(.name == "labhub.json") | .browser_download_url')"
+    if [[ -z "$labhub_url" || "$labhub_url" == "null" ]]; then
+        err "Could not locate labhub.json in latest release metadata."
+        exit 1
+    fi
+
+    curl -fsSL -o "$INDEX_CACHE" "$labhub_url" || {
+        err "Failed to download index file from: $labhub_url"
+        exit 1
+    }
+
+    jq -e . "$INDEX_CACHE" >/dev/null 2>&1 || {
+        err "Downloaded index file is not valid JSON."
+        exit 1
+    }
+}
+
+ensure_index() {
+    if [[ ! -s "$INDEX_CACHE" ]]; then
+        fetch_index
+        return
+    fi
+    jq -e . "$INDEX_CACHE" >/dev/null 2>&1 || fetch_index
+}
+
+select_mirror() {
+    require_cmd jq
+    mkdir -p "$STATE_DIR"
+
+    mapfile -t mirrors < <(jq -r '.url_properties.hostnames | keys[]' "$INDEX_CACHE")
+    if [[ "${#mirrors[@]}" -eq 0 ]]; then
+        err "No mirrors found in index."
+        exit 1
+    fi
+
+    local rotate="${ROTATE:-false}"
+    local forced="${MIRROR:-}"
+    local selected=""
+
+    if [[ -n "$forced" ]]; then
+        for m in "${mirrors[@]}"; do
+            if [[ "$m" == "$forced" ]]; then
+                selected="$m"
+                break
+            fi
+        done
+        if [[ -z "$selected" ]]; then
+            warn "Invalid MIRROR='$forced'. Falling back to first available mirror."
+            selected="${mirrors[0]}"
+        fi
+    elif [[ "$rotate" == "true" ]]; then
+        local last=""
+        if [[ -f "$LAST_MIRROR_FILE" ]]; then
+            last="$(<"$LAST_MIRROR_FILE")"
+        fi
+
+        selected="${mirrors[0]}"
+        for i in "${!mirrors[@]}"; do
+            if [[ "${mirrors[$i]}" == "$last" ]]; then
+                local next_index=$(((i + 1) % ${#mirrors[@]}))
+                selected="${mirrors[$next_index]}"
+                break
+            fi
+        done
+    else
+        if printf '%s\n' "${mirrors[@]}" | grep -qx "main"; then
+            selected="main"
+        else
+            selected="${mirrors[0]}"
+        fi
+    fi
+
+    echo "$selected" >"$LAST_MIRROR_FILE"
+    echo "$selected"
+}
+
+run_search() {
+    ensure_index
+
+    local arg2="${1:-}"
+    local arg3="${2:-}"
+    local normalized
+    normalized="$(normalize_type "$arg2")"
+
+    local mode_type=""
+    local filter=""
+    if [[ -n "$normalized" ]]; then
+        mode_type="$normalized"
+        filter="$arg3"
+    else
+        mode_type="ALL"
+        filter="$arg2"
+    fi
+
+    if [[ "$mode_type" == "ALL" ]]; then
+        local data
+        data="$(jq -r --arg filter "$filter" '
+          . as $root
+          | ["IOL", "QEMU", "DYNAMIPS"]
+          | map($root[.][] 
+            | select(($filter | length == 0) or (.name | test($filter; "i")))
+            | [.id, .name, .type, .metadata.total_human_size])
+          | .[]
+          | @tsv
+        ' "$INDEX_CACHE")"
+
+        if [[ -z "$data" ]]; then
+            warn "No matching images found."
+            exit 0
+        fi
+        {
+            echo -e "ID\tNAME\tTYPE\tSIZE"
+            echo -e "--\t----\t----\t----"
+            echo "$data"
+        } | column -t -s $'\t'
+        return
+    fi
+
+    local data
+    data="$(jq -r --arg type "$mode_type" --arg filter "$filter" '
+      .[$type][]
+      | select(($filter | length == 0) or (.name | test($filter; "i")))
+      | [.id, .name, .metadata.total_human_size]
+      | @tsv
+    ' "$INDEX_CACHE")"
+
+    if [[ -z "$data" ]]; then
+        warn "No matching $mode_type images found."
+        exit 0
+    fi
+    {
+        echo -e "ID\tNAME\tSIZE"
+        echo -e "--\t----\t----"
+        echo "$data"
+    } | column -t -s $'\t'
+}
+
+verify_file() {
+    local fpath="$1"
+    local expected_size="$2"
+    local expected_sha1="$3"
+    local expected_md5="$4"
+
+    local actual_size
+    actual_size="$(stat -c%s "$fpath")"
+    if [[ -n "$expected_size" && "$expected_size" != "null" && "$expected_size" =~ ^[0-9]+$ ]]; then
+        if [[ "$actual_size" -ne "$expected_size" ]]; then
+            err "Size mismatch for $(basename "$fpath"): expected=$expected_size actual=$actual_size"
+            return 1
+        fi
+    fi
+
+    if [[ -n "$expected_sha1" && "$expected_sha1" != "null" ]]; then
+        local actual_sha1
+        actual_sha1="$(sha1sum "$fpath" | awk '{print $1}')"
+        if [[ "$actual_sha1" != "$expected_sha1" ]]; then
+            err "SHA1 mismatch for $(basename "$fpath")"
+            return 1
+        fi
+    fi
+
+    if [[ -n "$expected_md5" && "$expected_md5" != "null" ]]; then
+        local actual_md5
+        actual_md5="$(md5sum "$fpath" | awk '{print $1}')"
+        if [[ "$actual_md5" != "$expected_md5" ]]; then
+            err "MD5 mismatch for $(basename "$fpath")"
+            return 1
+        fi
+    fi
+}
+
+extract_if_archive() {
+    local file="$1"
+    local install_dir="$2"
+    local low
+    low="$(echo "$file" | tr '[:upper:]' '[:lower:]')"
+
+    if [[ "$low" == *.zip ]]; then
+        require_cmd unzip
+        unzip -o "$file" -d "$install_dir" >/dev/null
+        rm -f "$file"
+    elif [[ "$low" == *.tar.gz || "$low" == *.tgz ]]; then
+        tar -xzf "$file" -C "$install_dir"
+        rm -f "$file"
+    fi
+}
+
+run_pull() {
+    require_root
+    ensure_index
+    require_cmd jq
+    require_cmd curl
+    require_cmd stat
+    require_cmd sha1sum
+    require_cmd md5sum
+
+    local raw_type="${1:-}"
+    local image_id="${2:-}"
+    local overwrite="${3:-}"
+
+    if [[ -z "$raw_type" || -z "$image_id" ]]; then
+        err "Usage: gns3-ipull pull <type> <id> [--overwrite]"
+        exit 1
+    fi
+    if [[ ! "$image_id" =~ ^[0-9]+$ ]]; then
+        err "ID must be numeric."
+        exit 1
+    fi
+
+    local type
+    type="$(normalize_type "$raw_type")"
+    if [[ -z "$type" || "$type" == "ALL" ]]; then
+        err "Type must be one of: qemu, iou/iol, dynamips"
+        exit 1
+    fi
+
+    local image_data
+    image_data="$(jq -c --arg type "$type" --argjson id "$image_id" '.[$type][] | select(.id == $id)' "$INDEX_CACHE")"
+    if [[ -z "$image_data" ]]; then
+        err "Image not found for type=$type id=$image_id"
+        exit 1
+    fi
+
+    local name
+    local protocol
+    local mirror
+    local hostname
+    local prefix
+    local install_dir
+
+    name="$(jq -r '.name' <<<"$image_data")"
+    protocol="$(jq -r '.url_properties.protocol' "$INDEX_CACHE")"
+    mirror="$(select_mirror)"
+    hostname="$(jq -r --arg m "$mirror" '.url_properties.hostnames[$m]' "$INDEX_CACHE")"
+    prefix="$(jq -r --arg m "$mirror" '.url_properties.prefixes[$m]' "$INDEX_CACHE")"
+    install_dir="$(install_dir_for_type "$type")"
+
+    if [[ -e "$install_dir/$name" && "$overwrite" != "--overwrite" ]]; then
+        err "Target already exists: $install_dir/$name (use --overwrite)"
+        exit 1
+    fi
+
+    mkdir -p "$install_dir"
+    if [[ "$overwrite" == "--overwrite" ]]; then
+        rm -rf "$install_dir/$name"
+    fi
+
+    log "${BLUE}[*] Pulling image:${NO_COLOR} $name"
+    log "${BLUE}[*] Type:${NO_COLOR} $type"
+    log "${BLUE}[*] Mirror:${NO_COLOR} $mirror ($hostname)"
+    log "${BLUE}[*] Destination:${NO_COLOR} $install_dir"
+
+    while IFS= read -r rel_path; do
+        [[ -z "$rel_path" || "$rel_path" == "null" ]] && continue
+
+        local url filename output
+        filename="$(basename "$rel_path")"
+        output="$install_dir/$filename"
+        url="$protocol://$hostname$prefix$rel_path"
+
+        log "${YELLOW}[-] Downloading:${NO_COLOR} $filename"
+        curl -fL --retry 3 --retry-delay 2 -o "$output" "$url"
+
+        local expected_size expected_sha1 expected_md5
+        expected_size="$(jq -r --arg fn "$filename" '.files[] | select(.filename == $fn) | .size' <<<"$image_data")"
+        expected_sha1="$(jq -r --arg fn "$filename" '.files[] | select(.filename == $fn) | .checksum.sha1' <<<"$image_data")"
+        expected_md5="$(jq -r --arg fn "$filename" '.files[] | select(.filename == $fn) | .checksum.md5' <<<"$image_data")"
+
+        verify_file "$output" "$expected_size" "$expected_sha1" "$expected_md5"
+        ok "Verified: $filename"
+
+        if [[ "$type" == "QEMU" ]]; then
+            extract_if_archive "$output" "$install_dir"
+        fi
+    done < <(jq -r '.files[].path' <<<"$image_data")
+
+    chown -R gns3:gns3 "$install_dir"
+    find "$install_dir" -type d -exec chmod 755 {} \;
+    find "$install_dir" -type f -exec chmod 644 {} \;
+
+    ok "Installation complete: $name -> $install_dir"
+    warn "Docker images are not supported in v1."
+}
+
+list_type() {
+    local type="$1"
+    local p
+    p="$(install_dir_for_type "$type")"
+    echo
+    log "${BLUE}[*] Installed $type images at $p${NO_COLOR}"
+    mkdir -p "$p"
+    find "$p" -mindepth 1 -maxdepth 2 -printf "%M %u:%g %10s %p\n" | sort || true
+}
+
+run_installed() {
+    local raw_type="${1:-all}"
+    local type
+    type="$(normalize_type "$raw_type")"
+
+    if [[ -z "$type" ]]; then
+        err "Usage: gns3-ipull installed <qemu|iou|iol|dynamips|all>"
+        exit 1
+    fi
+
+    if [[ "$type" == "ALL" ]]; then
+        list_type "QEMU"
+        list_type "IOL"
+        list_type "DYNAMIPS"
+        return
+    fi
+    list_type "$type"
+}
+
+show_help() {
+    cat <<'EOF'
+gns3-ipull v0.1.0
+
+Usage:
+  gns3-ipull search <type> [keyword]
+  gns3-ipull search <keyword>
+  gns3-ipull pull <type> <id> [--overwrite]
+  gns3-ipull installed <type|all>
+  gns3-ipull update-index
+  gns3-ipull --version
+
+Types:
+  qemu
+  iou / iol / bin
+  dynamips / ios
+
+Mapped destination paths:
+  qemu     -> /opt/gns3/images/QEMU
+  iou/iol  -> /opt/gns3/images/IOU
+  dynamips -> /opt/gns3/images/IOS
+
+Notes:
+  - Docker is intentionally out of scope in v1.
+  - pull requires root.
+  - Optional env vars: MIRROR, ROTATE=true, REPO_URL, INDEX_CACHE
+EOF
+}
+
+main() {
+    local action="${1:-help}"
+
+    case "$action" in
+    search)
+        run_search "${2:-}" "${3:-}"
+        ;;
+    pull)
+        run_pull "${2:-}" "${3:-}" "${4:-}"
+        ;;
+    installed)
+        run_installed "${2:-all}"
+        ;;
+    update-index)
+        fetch_index
+        ok "Index updated at: $INDEX_CACHE"
+        ;;
+    --version | version)
+        echo "$VERSION"
+        ;;
+    help | --help | -h)
+        show_help
+        ;;
+    *)
+        show_help
+        exit 1
+        ;;
+    esac
+}
+
+main "$@"
