@@ -293,6 +293,10 @@ verify_file() {
     fi
 
     if [[ "$hash_ok" != true ]]; then
+        err "Verification failed for $filename: downloaded file does not match expected checksum(s)."
+        warn "This usually means the upstream index entry and mirror file are out of sync."
+        warn "Try: gns3ipull update-index, then retry with another image ID."
+        warn "Cleanup stale staging dirs with: sudo gns3ipull cleanup"
         return 1
     fi
 
@@ -301,6 +305,7 @@ verify_file() {
             warn "Accepting qcow size mismatch because checksum verification passed: $filename"
             return 0
         fi
+        warn "Cleanup stale staging dirs with: sudo gns3ipull cleanup"
         return 1
     fi
 }
