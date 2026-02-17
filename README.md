@@ -1,4 +1,4 @@
-# gns3-ipull (v1)
+# gns3-ipull (v1.0.0)
 
 Minimal CLI to search and pull network emulator images for GNS3 VM.
 
@@ -47,6 +47,8 @@ gns3-ipull search <keyword>
 gns3-ipull pull <type> <id> [--overwrite]
 gns3-ipull installed <type|all>
 gns3-ipull update-index
+gns3-ipull license-check
+sudo gns3-ipull cleanup
 ```
 
 Examples:
@@ -57,6 +59,8 @@ gns3-ipull search forti
 sudo gns3-ipull pull qemu 123
 sudo gns3-ipull pull iou 12 --overwrite
 gns3-ipull installed all
+gns3-ipull license-check
+sudo gns3-ipull cleanup
 ```
 
 ## Notes
@@ -67,4 +71,6 @@ gns3-ipull installed all
 - URL-encoded filenames are decoded on install (for example `%5B` -> `[`).
 - `.md5sum` sidecar payload files are skipped.
 - QEMU pulls are normalized to top-level disk files in `/opt/gns3/images/QEMU` so they are visible in template creation.
+- `license-check` validates whether IOU/IOL license fields are present in `gns3_controller.conf`.
+- `cleanup` removes stale `.gns3-ipull-*` staging directories.
 - Docker templates/images are intentionally out of scope in v1.
