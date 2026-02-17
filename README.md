@@ -74,3 +74,7 @@ sudo gns3-ipull cleanup
 - `pull iou` warns when IOU/IOL license fields appear missing.
 - `license-check` validates whether IOU/IOL license fields are present in `gns3_controller.conf`.
 - `cleanup` removes stale `.gns3-ipull-*` staging directories.
+
+## Credits
+
+- Original concept and ecosystem inspiration: [ishare2-cli](https://github.com/ishare2-org/ishare2-cli)
