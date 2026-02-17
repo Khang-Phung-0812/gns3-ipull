@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here.
 
+## [1.1.0] - 2026-02-17
+
+### Added
+- Docker support for `search`, `pull`, and `installed`.
+- `pull iou/iol` warning when license fields appear missing in GNS3 controller config.
+
+### Changed
+- Version bumped to `1.1.0`.
+- Cross-type search now includes Docker entries when present in index data.
+- Type-specific search now safely handles missing sections in index data.
+
 ## [1.0.0] - 2026-02-17
 
 ### Added

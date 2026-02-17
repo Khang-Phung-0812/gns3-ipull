@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 STATE_DIR="${STATE_DIR:-/var/lib/gns3-ipull}"
 INDEX_CACHE="${INDEX_CACHE:-/tmp/gns3-ipull-labhub.json}"
 LAST_MIRROR_FILE="$STATE_DIR/last_mirror"
@@ -11,6 +11,7 @@ REPO_URL="${REPO_URL:-https://api.github.com/repos/ishare2-org/mirrors/releases/
 QEMU_DIR="${QEMU_DIR:-/opt/gns3/images/QEMU}"
 IOU_DIR="${IOU_DIR:-/opt/gns3/images/IOU}"
 IOS_DIR="${IOS_DIR:-/opt/gns3/images/IOS}"
+DOCKER_ROOT="${DOCKER_ROOT:-/opt/docker}"
 
 RED='\033[31m'
 YELLOW='\033[1;33m'
@@ -57,6 +58,7 @@ normalize_type() {
     qemu) echo "QEMU" ;;
     iou | iol | bin) echo "IOL" ;;
     dynamips | ios) echo "DYNAMIPS" ;;
+    docker) echo "DOCKER" ;;
     all) echo "ALL" ;;
     *) echo "" ;;
     esac
@@ -68,6 +70,7 @@ install_dir_for_type() {
     QEMU) echo "$QEMU_DIR" ;;
     IOL) echo "$IOU_DIR" ;;
     DYNAMIPS) echo "$IOS_DIR" ;;
+    DOCKER) echo "$DOCKER_ROOT" ;;
     *)
         err "Unsupported type: $type"
         exit 1
@@ -185,10 +188,10 @@ run_search() {
         local data
         data="$(jq -r --arg filter "$filter" '
           . as $root
-          | ["IOL", "QEMU", "DYNAMIPS"]
-          | map($root[.][] 
+          | ["IOL", "QEMU", "DYNAMIPS", "DOCKER"]
+          | map(($root[.] // [])[]
             | select(($filter | length == 0) or (.name | test($filter; "i")))
-            | [.id, .name, .type, .metadata.total_human_size])
+            | [.id, .name, .type, (.metadata.total_human_size // "-")])
           | .[]
           | @tsv
         ' "$INDEX_CACHE")"
@@ -207,9 +210,9 @@ run_search() {
 
     local data
     data="$(jq -r --arg type "$mode_type" --arg filter "$filter" '
-      .[$type][]
+      (.[$type] // [])[]
       | select(($filter | length == 0) or (.name | test($filter; "i")))
-      | [.id, .name, .metadata.total_human_size]
+      | [.id, .name, (.metadata.total_human_size // "-")]
       | @tsv
     ' "$INDEX_CACHE")"
 
@@ -326,9 +329,6 @@ run_pull() {
     ensure_index
     require_cmd jq
     require_cmd curl
-    require_cmd stat
-    require_cmd sha1sum
-    require_cmd md5sum
 
     local raw_type="${1:-}"
     local image_id="${2:-}"
@@ -346,12 +346,12 @@ run_pull() {
     local type
     type="$(normalize_type "$raw_type")"
     if [[ -z "$type" || "$type" == "ALL" ]]; then
-        err "Type must be one of: qemu, iou/iol, dynamips"
+        err "Type must be one of: qemu, iou/iol, dynamips, docker"
         exit 1
     fi
 
     local image_data
-    image_data="$(jq -c --arg type "$type" --argjson id "$image_id" '.[$type][] | select(.id == $id)' "$INDEX_CACHE")"
+    image_data="$(jq -c --arg type "$type" --argjson id "$image_id" '(.[$type] // [])[] | select(.id == $id)' "$INDEX_CACHE")"
     if [[ -z "$image_data" ]]; then
         err "Image not found for type=$type id=$image_id"
         exit 1
@@ -365,6 +365,31 @@ run_pull() {
     local install_dir
 
     name="$(jq -r '.name' <<<"$image_data")"
+    if [[ "$type" == "IOL" ]] && ! is_iou_license_config_present; then
+        warn "IOU/IOL license fields appear missing. The image can install, but node boot may fail."
+        warn "Run: gns3-ipull license-check"
+    fi
+
+    if [[ "$type" == "DOCKER" ]]; then
+        require_cmd docker
+        local docker_ref
+        docker_ref="$(jq -r '(.metadata.docker_image // .metadata.image // .docker_image // .name)' <<<"$image_data")"
+        if [[ -z "$docker_ref" || "$docker_ref" == "null" ]]; then
+            err "Could not resolve Docker image reference from index data."
+            exit 1
+        fi
+        log "${BLUE}[*] Pulling Docker image:${NO_COLOR} $docker_ref"
+        docker pull "$docker_ref"
+        docker image inspect "$docker_ref" >/dev/null
+        ok "Docker image pulled successfully: $docker_ref"
+        warn "Use 'New Template -> Docker container' in GNS3 and select image: $docker_ref"
+        return
+    fi
+
+    require_cmd stat
+    require_cmd sha1sum
+    require_cmd md5sum
+
     protocol="$(jq -r '.url_properties.protocol' "$INDEX_CACHE")"
     mirror="$(select_mirror)"
     hostname="$(jq -r --arg m "$mirror" '.url_properties.hostnames[$m]' "$INDEX_CACHE")"
@@ -453,11 +478,18 @@ run_pull() {
     if [[ "$type" == "QEMU" ]]; then
         warn "Use 'New Template -> QEMU VM' and select one of the installed top-level disk files."
     fi
-    warn "Docker images are not supported in v1."
 }
 
 list_type() {
     local type="$1"
+    if [[ "$type" == "DOCKER" ]]; then
+        require_cmd docker
+        echo
+        log "${BLUE}[*] Installed DOCKER images (docker images)${NO_COLOR}"
+        docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}"
+        return
+    fi
+
     local p
     p="$(install_dir_for_type "$type")"
     echo
@@ -472,7 +504,7 @@ run_installed() {
     type="$(normalize_type "$raw_type")"
 
     if [[ -z "$type" ]]; then
-        err "Usage: gns3-ipull installed <qemu|iou|iol|dynamips|all>"
+        err "Usage: gns3-ipull installed <qemu|iou|iol|dynamips|docker|all>"
         exit 1
     fi
 
@@ -480,6 +512,7 @@ run_installed() {
         list_type "QEMU"
         list_type "IOL"
         list_type "DYNAMIPS"
+        list_type "DOCKER"
         return
     fi
     list_type "$type"
@@ -545,6 +578,17 @@ run_license_check() {
     return 3
 }
 
+is_iou_license_config_present() {
+    local conf
+    conf="$(resolve_controller_conf)"
+    [[ -n "$conf" ]] || return 1
+
+    local has_iou_license has_iourc_content
+    has_iou_license="$(grep -c '"iou_license"' "$conf" || true)"
+    has_iourc_content="$(grep -c '"iourc_content"' "$conf" || true)"
+    [[ "$has_iou_license" -gt 0 && "$has_iourc_content" -gt 0 ]]
+}
+
 run_cleanup() {
     require_root
     local removed=0
@@ -569,7 +613,7 @@ run_cleanup() {
 
 show_help() {
     cat <<'EOF'
-gns3-ipull v1.0.0
+gns3-ipull v1.1.0
 
 Usage:
   gns3-ipull search <type> [keyword]
@@ -585,16 +629,18 @@ Types:
   qemu
   iou / iol / bin
   dynamips / ios
+  docker
 
 Mapped destination paths:
   qemu     -> /opt/gns3/images/QEMU
   iou/iol  -> /opt/gns3/images/IOU
   dynamips -> /opt/gns3/images/IOS
+  docker   -> Docker engine storage (for example /opt/docker)
 
 Notes:
-  - Docker is intentionally out of scope in v1.
   - pull requires root.
   - cleanup requires root.
+  - pull iou/iol warns if IOU license fields appear missing.
   - QEMU pulls are normalized to top-level disk images in /opt/gns3/images/QEMU.
   - Optional env vars: MIRROR, ROTATE=true, REPO_URL, INDEX_CACHE
 EOF
