@@ -1,4 +1,4 @@
-# gns3-ipull (v1.1.0)
+# gns3-ipull (v1.1.1)
 
 Minimal CLI to search and pull network emulator images for GNS3 VM.
 
@@ -16,13 +16,13 @@ v1 excludes:
 - `relicense`
 - `upgrade`
 - GUI
+- Docker image workflow
 
 ## Supported Types
 
 - `qemu` -> `/opt/gns3/images/QEMU`
 - `iou` / `iol` / `bin` -> `/opt/gns3/images/IOU`
 - `dynamips` / `ios` -> `/opt/gns3/images/IOS`
-- `docker` -> Docker engine storage (for example `/opt/docker`)
 
 ## Install
 
@@ -58,7 +58,6 @@ gns3-ipull search qemu vios
 gns3-ipull search forti
 sudo gns3-ipull pull qemu 123
 sudo gns3-ipull pull iou 12 --overwrite
-sudo gns3-ipull pull docker 77
 gns3-ipull installed all
 gns3-ipull license-check
 sudo gns3-ipull cleanup
@@ -75,4 +74,3 @@ sudo gns3-ipull cleanup
 - `pull iou` warns when IOU/IOL license fields appear missing.
 - `license-check` validates whether IOU/IOL license fields are present in `gns3_controller.conf`.
 - `cleanup` removes stale `.gns3-ipull-*` staging directories.
-- `pull docker` pulls the image with Docker and prints template creation guidance.

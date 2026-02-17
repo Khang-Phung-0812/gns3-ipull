@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## [1.1.1] - 2026-02-17
+
+### Changed
+- Version bumped to `1.1.1`.
+- Docker support removed from `search`, `pull`, and `installed`.
+- IOU/IOL license warning during `pull iou/iol` remains enabled.
+
 ## [1.1.0] - 2026-02-17
 
 ### Added
