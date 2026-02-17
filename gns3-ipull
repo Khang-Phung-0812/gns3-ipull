@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="1.1.4"
+VERSION="1.1.5"
 STATE_DIR="${STATE_DIR:-/var/lib/gns3-ipull}"
 INDEX_CACHE="${INDEX_CACHE:-/tmp/gns3-ipull-labhub.json}"
 LAST_MIRROR_FILE="$STATE_DIR/last_mirror"
@@ -635,6 +635,124 @@ run_cleanup() {
     ok "Cleanup complete. Removed $removed staging director(ies)."
 }
 
+add_unique_path() {
+    local -n arr_ref=$1
+    local candidate="$2"
+    local existing
+    for existing in "${arr_ref[@]}"; do
+        if [[ "$existing" == "$candidate" ]]; then
+            return
+        fi
+    done
+    arr_ref+=("$candidate")
+}
+
+run_delete() {
+    require_root
+    local mode="name"
+    local yes=false
+
+    if [[ "${1:-}" == "--id" ]]; then
+        mode="id"
+        shift
+    fi
+
+    local raw_type="${1:-}"
+    local value="${2:-}"
+    shift $(( $# >= 2 ? 2 : $# ))
+
+    local arg
+    for arg in "$@"; do
+        [[ "$arg" == "--yes" ]] && yes=true
+    done
+
+    if [[ -z "$raw_type" || -z "$value" ]]; then
+        err "Usage: gns3ipull delete [--id] <type> <name|id> [--yes]"
+        exit 1
+    fi
+
+    local type
+    type="$(normalize_type "$raw_type")"
+    if [[ -z "$type" || "$type" == "ALL" ]]; then
+        err "Type must be one of: qemu, iou/iol, dynamips"
+        exit 1
+    fi
+
+    local target_name="$value"
+    if [[ "$mode" == "id" ]]; then
+        ensure_index
+        if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+            err "When using --id, the target must be numeric."
+            exit 1
+        fi
+        local image_data
+        image_data="$(jq -c --arg type "$type" --argjson id "$value" '(.[$type] // [])[] | select(.id == $id)' "$INDEX_CACHE")"
+        if [[ -z "$image_data" ]]; then
+            err "Image not found for type=$type id=$value"
+            exit 1
+        fi
+        target_name="$(jq -r '.name' <<<"$image_data")"
+    fi
+
+    local base_dir
+    base_dir="$(install_dir_for_type "$type")"
+    if [[ ! -d "$base_dir" ]]; then
+        err "Install directory not found: $base_dir"
+        exit 1
+    fi
+
+    local -a to_delete=()
+    local p
+
+    if [[ -e "$base_dir/$target_name" ]]; then
+        add_unique_path to_delete "$base_dir/$target_name"
+    fi
+
+    if [[ "$type" == "QEMU" ]]; then
+        while IFS= read -r p; do
+            [[ -n "$p" ]] && add_unique_path to_delete "$p"
+        done < <(find "$base_dir" -maxdepth 1 -type f -name "${target_name}.*" 2>/dev/null)
+    fi
+
+    if [[ "${#to_delete[@]}" -eq 0 ]]; then
+        err "No installed files found for target: $target_name"
+        exit 1
+    fi
+
+    # Also remove sidecar checksum files for file targets.
+    local item
+    for item in "${to_delete[@]}"; do
+        if [[ -f "$item" && -f "$item.md5sum" ]]; then
+            add_unique_path to_delete "$item.md5sum"
+        fi
+    done
+
+    log "${YELLOW}[!] Delete request${NO_COLOR}"
+    log "Type: $type"
+    log "Target: $target_name"
+    log "Paths:"
+    for item in "${to_delete[@]}"; do
+        log "  - $item"
+    done
+
+    if [[ "$yes" != true ]]; then
+        read -r -p "Proceed with deletion? [y/N]: " answer
+        if [[ ! "$answer" =~ ^[Yy]$ ]]; then
+            warn "Delete cancelled."
+            return 0
+        fi
+    fi
+
+    for item in "${to_delete[@]}"; do
+        if [[ -d "$item" ]]; then
+            rm -rf "$item"
+        else
+            rm -f "$item"
+        fi
+        ok "Deleted: $item"
+    done
+}
+
 run_update_self() {
     require_root
     local target
@@ -663,12 +781,13 @@ run_update_self() {
 
 show_help() {
     cat <<'EOF'
-gns3ipull v1.1.4
+gns3ipull v1.1.5
 
 Usage:
   gns3ipull search <type> [keyword]
   gns3ipull search <keyword>
   gns3ipull pull <type> <id> [--overwrite]
+  gns3ipull delete [--id] <type> <name|id> [--yes]
   gns3ipull installed <type|all>
   gns3ipull update-index
   gns3ipull update-self
@@ -688,6 +807,7 @@ Mapped destination paths:
 
 Notes:
   - pull requires root.
+  - delete requires root.
   - update-self requires root.
   - cleanup requires root.
   - pull iou/iol warns if IOU license fields appear missing.
@@ -705,6 +825,9 @@ main() {
         ;;
     pull)
         run_pull "${2:-}" "${3:-}" "${4:-}"
+        ;;
+    delete)
+        run_delete "${2:-}" "${3:-}" "${4:-}" "${5:-}"
         ;;
     installed)
         run_installed "${2:-all}"

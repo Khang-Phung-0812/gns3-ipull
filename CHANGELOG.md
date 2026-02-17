@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## [1.1.5] - 2026-02-17
+
+### Added
+- `delete` command to remove installed images by name or by index ID.
+- Automatic `.md5sum` sidecar deletion for removed image files.
+
+### Changed
+- Version bumped to `1.1.5`.
+
 ## [1.1.4] - 2026-02-17
 
 ### Added

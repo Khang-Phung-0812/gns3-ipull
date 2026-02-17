@@ -1,4 +1,4 @@
-# gns3ipull (v1.1.4)
+# gns3ipull (v1.1.5)
 
 Minimal CLI to search and pull network emulator images for GNS3 VM.
 
@@ -101,6 +101,7 @@ sudo gns3ipull cleanup
 gns3ipull search <type> [keyword]
 gns3ipull search <keyword>
 gns3ipull pull <type> <id> [--overwrite]
+sudo gns3ipull delete [--id] <type> <name|id> [--yes]
 gns3ipull installed <type|all>
 gns3ipull update-index
 sudo gns3ipull update-self
@@ -115,6 +116,8 @@ gns3ipull search qemu vios
 gns3ipull search forti
 sudo gns3ipull pull qemu 123
 sudo gns3ipull pull iou 12 --overwrite
+sudo gns3ipull delete qemu linux-kali-2018.1-amd64.qcow2 --yes
+sudo gns3ipull delete --id qemu 872 --yes
 gns3ipull installed all
 sudo gns3ipull update-self
 gns3ipull license-check
@@ -124,6 +127,7 @@ sudo gns3ipull cleanup
 ## Notes
 
 - `pull` requires root.
+- `delete` requires root.
 - `update-self` requires root.
 - The tool fetches `labhub.json` from `ishare2-org/mirrors` latest release.
 - Integrity checks are performed (size, SHA1, MD5 where available).
@@ -131,6 +135,7 @@ sudo gns3ipull cleanup
 - URL-encoded filenames are decoded on install (for example `%5B` -> `[`).
 - `.md5sum` sidecar payload files are skipped.
 - QEMU pulls are normalized to top-level disk files in `/opt/gns3/images/QEMU` so they are visible in template creation.
+- `delete` removes matching image file(s) and their `.md5sum` sidecar files when present.
 - `pull iou` warns when IOU/IOL license fields appear missing.
 - `license-check` validates whether IOU/IOL license fields are present in `gns3_controller.conf`.
 - `cleanup` removes stale `.gns3-ipull-*` staging directories.
