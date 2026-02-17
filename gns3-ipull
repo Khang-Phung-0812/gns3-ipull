@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="1.1.2"
+VERSION="1.1.4"
 STATE_DIR="${STATE_DIR:-/var/lib/gns3-ipull}"
 INDEX_CACHE="${INDEX_CACHE:-/tmp/gns3-ipull-labhub.json}"
 LAST_MIRROR_FILE="$STATE_DIR/last_mirror"
 REPO_URL="${REPO_URL:-https://api.github.com/repos/ishare2-org/mirrors/releases/latest}"
+SELF_UPDATE_URL="${SELF_UPDATE_URL:-https://raw.githubusercontent.com/Khang-Phung-0812/gns3-ipull/main/gns3-ipull}"
 
 # GNS3 v1 type mapping
 QEMU_DIR="${QEMU_DIR:-/opt/gns3/images/QEMU}"
@@ -49,6 +50,22 @@ require_root() {
         err "This command requires root."
         exit 1
     fi
+}
+
+download_to_file() {
+    local url="$1"
+    local output="$2"
+
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$url" -o "$output"
+        return
+    fi
+    if command -v wget >/dev/null 2>&1; then
+        wget -qO "$output" "$url"
+        return
+    fi
+    err "Missing dependency: curl or wget"
+    exit 1
 }
 
 normalize_type() {
@@ -229,32 +246,62 @@ verify_file() {
     local expected_size="$2"
     local expected_sha1="$3"
     local expected_md5="$4"
+    local filename ext lower_ext
+    filename="$(basename "$fpath")"
+    ext="${filename##*.}"
+    lower_ext="$(echo "$ext" | tr '[:upper:]' '[:lower:]')"
+    local is_qcow=false
+    [[ "$lower_ext" == "qcow2" || "$lower_ext" == "qcow" ]] && is_qcow=true
 
     local actual_size
+    local size_ok=true
     actual_size="$(stat -c%s "$fpath")"
     if [[ -n "$expected_size" && "$expected_size" != "null" && "$expected_size" =~ ^[0-9]+$ ]]; then
         if [[ "$actual_size" -ne "$expected_size" ]]; then
-            err "Size mismatch for $(basename "$fpath"): expected=$expected_size actual=$actual_size"
-            return 1
+            size_ok=false
+            # Some qcow/qcow2 entries are indexed with non-file-length sizes.
+            # In that case, we rely on hash validation when available.
+            if [[ "$is_qcow" == true ]]; then
+                warn "Size mismatch for $filename: expected=$expected_size actual=$actual_size (qcow)"
+            else
+                err "Size mismatch for $filename: expected=$expected_size actual=$actual_size"
+            fi
         fi
     fi
 
+    local hash_checked=false
+    local hash_ok=true
+
     if [[ -n "$expected_sha1" && "$expected_sha1" != "null" ]]; then
+        hash_checked=true
         local actual_sha1
         actual_sha1="$(sha1sum "$fpath" | awk '{print $1}')"
         if [[ "$actual_sha1" != "$expected_sha1" ]]; then
-            err "SHA1 mismatch for $(basename "$fpath")"
-            return 1
+            hash_ok=false
+            err "SHA1 mismatch for $filename"
         fi
     fi
 
     if [[ -n "$expected_md5" && "$expected_md5" != "null" ]]; then
+        hash_checked=true
         local actual_md5
         actual_md5="$(md5sum "$fpath" | awk '{print $1}')"
         if [[ "$actual_md5" != "$expected_md5" ]]; then
-            err "MD5 mismatch for $(basename "$fpath")"
-            return 1
+            hash_ok=false
+            err "MD5 mismatch for $filename"
         fi
+    fi
+
+    if [[ "$hash_ok" != true ]]; then
+        return 1
+    fi
+
+    if [[ "$size_ok" != true ]]; then
+        if [[ "$is_qcow" == true && "$hash_checked" == true ]]; then
+            warn "Accepting qcow size mismatch because checksum verification passed: $filename"
+            return 0
+        fi
+        return 1
     fi
 }
 
@@ -583,9 +630,35 @@ run_cleanup() {
     ok "Cleanup complete. Removed $removed staging director(ies)."
 }
 
+run_update_self() {
+    require_root
+    local target
+    target="$(command -v gns3ipull || true)"
+    if [[ -z "$target" ]]; then
+        target="/usr/local/bin/gns3ipull"
+    fi
+
+    local tmp
+    tmp="$(mktemp /tmp/gns3ipull-update-XXXXXX)"
+
+    log "${BLUE}[*] Downloading latest gns3ipull from:${NO_COLOR} $SELF_UPDATE_URL"
+    download_to_file "$SELF_UPDATE_URL" "$tmp" || {
+        rm -f "$tmp"
+        err "Failed to download update."
+        exit 1
+    }
+
+    chmod +x "$tmp"
+    install -m 755 "$tmp" "$target"
+    rm -f "$tmp"
+
+    ok "Updated: $target"
+    "$target" --version || true
+}
+
 show_help() {
     cat <<'EOF'
-gns3ipull v1.1.2
+gns3ipull v1.1.4
 
 Usage:
   gns3ipull search <type> [keyword]
@@ -593,6 +666,7 @@ Usage:
   gns3ipull pull <type> <id> [--overwrite]
   gns3ipull installed <type|all>
   gns3ipull update-index
+  gns3ipull update-self
   gns3ipull license-check
   gns3ipull cleanup
   gns3ipull --version
@@ -609,10 +683,11 @@ Mapped destination paths:
 
 Notes:
   - pull requires root.
+  - update-self requires root.
   - cleanup requires root.
   - pull iou/iol warns if IOU license fields appear missing.
   - QEMU pulls are normalized to top-level disk images in /opt/gns3/images/QEMU.
-  - Optional env vars: MIRROR, ROTATE=true, REPO_URL, INDEX_CACHE
+  - Optional env vars: MIRROR, ROTATE=true, REPO_URL, INDEX_CACHE, SELF_UPDATE_URL
 EOF
 }
 
@@ -632,6 +707,9 @@ main() {
     update-index)
         fetch_index
         ok "Index updated at: $INDEX_CACHE"
+        ;;
+    update-self)
+        run_update_self
         ;;
     license-check)
         run_license_check

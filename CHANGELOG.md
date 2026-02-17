@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented here.
 
+## [1.1.4] - 2026-02-17
+
+### Added
+- `update-self` command to download and install the latest `gns3ipull` script from GitHub.
+
+### Changed
+- Version bumped to `1.1.4`.
+
+## [1.1.3] - 2026-02-17
+
+### Changed
+- Version bumped to `1.1.3`.
+- QCOW/QCOW2 verification now allows indexed-size mismatch when checksum verification passes.
+- Non-QCOW files still fail on strict size mismatch.
+
 ## [1.1.2] - 2026-02-17
 
 ### Changed

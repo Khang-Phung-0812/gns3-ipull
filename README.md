@@ -1,4 +1,4 @@
-# gns3ipull (v1.1.2)
+# gns3ipull (v1.1.4)
 
 Minimal CLI to search and pull network emulator images for GNS3 VM.
 
@@ -49,7 +49,13 @@ sudo chmod +x /usr/local/bin/gns3ipull
 gns3ipull update-index
 ```
 
-2. Search for images and note the ID:
+2. Update `gns3ipull` itself to latest:
+
+```bash
+sudo gns3ipull update-self
+```
+
+3. Search for images and note the ID:
 
 ```bash
 gns3ipull search qemu vios
@@ -57,7 +63,7 @@ gns3ipull search iou
 gns3ipull search dynamips c7200
 ```
 
-3. Pull the image by type and ID:
+4. Pull the image by type and ID:
 
 ```bash
 sudo gns3ipull pull qemu <QEMU_ID>
@@ -65,25 +71,25 @@ sudo gns3ipull pull iou <IOL_ID>
 sudo gns3ipull pull dynamips <DYNAMIPS_ID>
 ```
 
-4. Verify installed files:
+5. Verify installed files:
 
 ```bash
 gns3ipull installed all
 ```
 
-5. Validate IOU/IOL license state (recommended before using IOU nodes):
+6. Validate IOU/IOL license state (recommended before using IOU nodes):
 
 ```bash
 gns3ipull license-check
 ```
 
-6. Create templates in GNS3:
+7. Create templates in GNS3:
 
 - For QEMU: `New Template -> QEMU VM`, then select the installed disk image.
 - For IOU/IOL: `New Template -> IOU Device`, then pick your pulled binary.
 - For Dynamips: `New Template -> Dynamips IOS router`, then pick your pulled image.
 
-7. Clean stale staging directories if needed:
+8. Clean stale staging directories if needed:
 
 ```bash
 sudo gns3ipull cleanup
@@ -97,6 +103,7 @@ gns3ipull search <keyword>
 gns3ipull pull <type> <id> [--overwrite]
 gns3ipull installed <type|all>
 gns3ipull update-index
+sudo gns3ipull update-self
 gns3ipull license-check
 sudo gns3ipull cleanup
 ```
@@ -109,6 +116,7 @@ gns3ipull search forti
 sudo gns3ipull pull qemu 123
 sudo gns3ipull pull iou 12 --overwrite
 gns3ipull installed all
+sudo gns3ipull update-self
 gns3ipull license-check
 sudo gns3ipull cleanup
 ```
@@ -116,8 +124,10 @@ sudo gns3ipull cleanup
 ## Notes
 
 - `pull` requires root.
+- `update-self` requires root.
 - The tool fetches `labhub.json` from `ishare2-org/mirrors` latest release.
 - Integrity checks are performed (size, SHA1, MD5 where available).
+- For `qcow/qcow2`, if indexed size differs but checksum passes, install continues with a warning.
 - URL-encoded filenames are decoded on install (for example `%5B` -> `[`).
 - `.md5sum` sidecar payload files are skipped.
 - QEMU pulls are normalized to top-level disk files in `/opt/gns3/images/QEMU` so they are visible in template creation.
