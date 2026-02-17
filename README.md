@@ -1,4 +1,4 @@
-# gns3-ipull (v1.1.1)
+# gns3ipull (v1.1.2)
 
 Minimal CLI to search and pull network emulator images for GNS3 VM.
 
@@ -29,7 +29,7 @@ v1 excludes:
 Install directly from GitHub using `wget`:
 
 ```bash
-sudo wget -O /usr/local/bin/gns3-ipull "https://raw.githubusercontent.com/Khang-Phung-0812/gns3-ipull/main/gns3-ipull" && sudo chmod +x /usr/local/bin/gns3-ipull && gns3-ipull --help
+sudo wget -O /usr/local/bin/gns3ipull "https://raw.githubusercontent.com/Khang-Phung-0812/gns3-ipull/main/gns3-ipull" && sudo chmod +x /usr/local/bin/gns3ipull && gns3ipull --help
 ```
 
 Install by cloning the repository:
@@ -37,8 +37,8 @@ Install by cloning the repository:
 ```bash
 git clone https://github.com/Khang-Phung-0812/gns3-ipull.git
 cd gns3-ipull
-sudo cp gns3-ipull /usr/local/bin/gns3-ipull
-sudo chmod +x /usr/local/bin/gns3-ipull
+sudo cp gns3-ipull /usr/local/bin/gns3ipull
+sudo chmod +x /usr/local/bin/gns3ipull
 ```
 
 ## How To Use
@@ -46,35 +46,35 @@ sudo chmod +x /usr/local/bin/gns3-ipull
 1. Update the image index:
 
 ```bash
-gns3-ipull update-index
+gns3ipull update-index
 ```
 
 2. Search for images and note the ID:
 
 ```bash
-gns3-ipull search qemu vios
-gns3-ipull search iou
-gns3-ipull search dynamips c7200
+gns3ipull search qemu vios
+gns3ipull search iou
+gns3ipull search dynamips c7200
 ```
 
 3. Pull the image by type and ID:
 
 ```bash
-sudo gns3-ipull pull qemu <QEMU_ID>
-sudo gns3-ipull pull iou <IOL_ID>
-sudo gns3-ipull pull dynamips <DYNAMIPS_ID>
+sudo gns3ipull pull qemu <QEMU_ID>
+sudo gns3ipull pull iou <IOL_ID>
+sudo gns3ipull pull dynamips <DYNAMIPS_ID>
 ```
 
 4. Verify installed files:
 
 ```bash
-gns3-ipull installed all
+gns3ipull installed all
 ```
 
 5. Validate IOU/IOL license state (recommended before using IOU nodes):
 
 ```bash
-gns3-ipull license-check
+gns3ipull license-check
 ```
 
 6. Create templates in GNS3:
@@ -86,31 +86,31 @@ gns3-ipull license-check
 7. Clean stale staging directories if needed:
 
 ```bash
-sudo gns3-ipull cleanup
+sudo gns3ipull cleanup
 ```
 
 ## Command Reference
 
 ```bash
-gns3-ipull search <type> [keyword]
-gns3-ipull search <keyword>
-gns3-ipull pull <type> <id> [--overwrite]
-gns3-ipull installed <type|all>
-gns3-ipull update-index
-gns3-ipull license-check
-sudo gns3-ipull cleanup
+gns3ipull search <type> [keyword]
+gns3ipull search <keyword>
+gns3ipull pull <type> <id> [--overwrite]
+gns3ipull installed <type|all>
+gns3ipull update-index
+gns3ipull license-check
+sudo gns3ipull cleanup
 ```
 
 Examples:
 
 ```bash
-gns3-ipull search qemu vios
-gns3-ipull search forti
-sudo gns3-ipull pull qemu 123
-sudo gns3-ipull pull iou 12 --overwrite
-gns3-ipull installed all
-gns3-ipull license-check
-sudo gns3-ipull cleanup
+gns3ipull search qemu vios
+gns3ipull search forti
+sudo gns3ipull pull qemu 123
+sudo gns3ipull pull iou 12 --overwrite
+gns3ipull installed all
+gns3ipull license-check
+sudo gns3ipull cleanup
 ```
 
 ## Notes

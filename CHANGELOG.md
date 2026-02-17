@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## [1.1.2] - 2026-02-17
+
+### Changed
+- Version bumped to `1.1.2`.
+- User-facing command name updated from `gns3-ipull` to `gns3ipull` in help and documentation.
+
 ## [1.1.1] - 2026-02-17
 
 ### Changed

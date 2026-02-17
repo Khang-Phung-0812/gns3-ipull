@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="1.1.1"
+VERSION="1.1.2"
 STATE_DIR="${STATE_DIR:-/var/lib/gns3-ipull}"
 INDEX_CACHE="${INDEX_CACHE:-/tmp/gns3-ipull-labhub.json}"
 LAST_MIRROR_FILE="$STATE_DIR/last_mirror"
@@ -332,7 +332,7 @@ run_pull() {
     local overwrite="${3:-}"
 
     if [[ -z "$raw_type" || -z "$image_id" ]]; then
-        err "Usage: gns3-ipull pull <type> <id> [--overwrite]"
+        err "Usage: gns3ipull pull <type> <id> [--overwrite]"
         exit 1
     fi
     if [[ ! "$image_id" =~ ^[0-9]+$ ]]; then
@@ -364,7 +364,7 @@ run_pull() {
     name="$(jq -r '.name' <<<"$image_data")"
     if [[ "$type" == "IOL" ]] && ! is_iou_license_config_present; then
         warn "IOU/IOL license fields appear missing. The image can install, but node boot may fail."
-        warn "Run: gns3-ipull license-check"
+        warn "Run: gns3ipull license-check"
     fi
 
     require_cmd stat
@@ -477,7 +477,7 @@ run_installed() {
     type="$(normalize_type "$raw_type")"
 
     if [[ -z "$type" ]]; then
-        err "Usage: gns3-ipull installed <qemu|iou|iol|dynamips|all>"
+        err "Usage: gns3ipull installed <qemu|iou|iol|dynamips|all>"
         exit 1
     fi
 
@@ -585,17 +585,17 @@ run_cleanup() {
 
 show_help() {
     cat <<'EOF'
-gns3-ipull v1.1.1
+gns3ipull v1.1.2
 
 Usage:
-  gns3-ipull search <type> [keyword]
-  gns3-ipull search <keyword>
-  gns3-ipull pull <type> <id> [--overwrite]
-  gns3-ipull installed <type|all>
-  gns3-ipull update-index
-  gns3-ipull license-check
-  gns3-ipull cleanup
-  gns3-ipull --version
+  gns3ipull search <type> [keyword]
+  gns3ipull search <keyword>
+  gns3ipull pull <type> <id> [--overwrite]
+  gns3ipull installed <type|all>
+  gns3ipull update-index
+  gns3ipull license-check
+  gns3ipull cleanup
+  gns3ipull --version
 
 Types:
   qemu
