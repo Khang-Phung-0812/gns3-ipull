@@ -32,14 +32,64 @@ Install directly from GitHub using `wget`:
 sudo wget -O /usr/local/bin/gns3-ipull "https://raw.githubusercontent.com/Khang-Phung-0812/gns3-ipull/main/gns3-ipull" && sudo chmod +x /usr/local/bin/gns3-ipull && gns3-ipull --help
 ```
 
-Install from a local clone:
+Install by cloning the repository:
 
 ```bash
+git clone https://github.com/Khang-Phung-0812/gns3-ipull.git
+cd gns3-ipull
 sudo cp gns3-ipull /usr/local/bin/gns3-ipull
 sudo chmod +x /usr/local/bin/gns3-ipull
 ```
 
-## Usage
+## How To Use
+
+1. Update the image index:
+
+```bash
+gns3-ipull update-index
+```
+
+2. Search for images and note the ID:
+
+```bash
+gns3-ipull search qemu vios
+gns3-ipull search iou
+gns3-ipull search dynamips c7200
+```
+
+3. Pull the image by type and ID:
+
+```bash
+sudo gns3-ipull pull qemu <QEMU_ID>
+sudo gns3-ipull pull iou <IOL_ID>
+sudo gns3-ipull pull dynamips <DYNAMIPS_ID>
+```
+
+4. Verify installed files:
+
+```bash
+gns3-ipull installed all
+```
+
+5. Validate IOU/IOL license state (recommended before using IOU nodes):
+
+```bash
+gns3-ipull license-check
+```
+
+6. Create templates in GNS3:
+
+- For QEMU: `New Template -> QEMU VM`, then select the installed disk image.
+- For IOU/IOL: `New Template -> IOU Device`, then pick your pulled binary.
+- For Dynamips: `New Template -> Dynamips IOS router`, then pick your pulled image.
+
+7. Clean stale staging directories if needed:
+
+```bash
+sudo gns3-ipull cleanup
+```
+
+## Command Reference
 
 ```bash
 gns3-ipull search <type> [keyword]
