@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="0.1.0"
+VERSION="0.1.1"
 STATE_DIR="${STATE_DIR:-/var/lib/gns3-ipull}"
 INDEX_CACHE="${INDEX_CACHE:-/tmp/gns3-ipull-labhub.json}"
 LAST_MIRROR_FILE="$STATE_DIR/last_mirror"
@@ -22,6 +22,19 @@ log() { echo -e "$*"; }
 err() { echo -e "${RED}[-] $*${NO_COLOR}" >&2; }
 warn() { echo -e "${YELLOW}[!] $*${NO_COLOR}"; }
 ok() { echo -e "${GREEN}[+] $*${NO_COLOR}"; }
+
+url_decode() {
+    local encoded="${1//+/ }"
+    printf '%b' "${encoded//%/\\x}"
+}
+
+sanitize_filename() {
+    local in="$1"
+    # Keep the name stable but remove path separators.
+    in="${in//\//_}"
+    in="${in//\\/_}"
+    echo "$in"
+}
 
 require_cmd() {
     local name="$1"
@@ -261,6 +274,53 @@ extract_if_archive() {
     fi
 }
 
+copy_with_unique_name() {
+    local src="$1"
+    local dst_dir="$2"
+    local base_name="$3"
+    local ext="$4"
+
+    local candidate="$dst_dir/$base_name.$ext"
+    local n=1
+    while [[ -e "$candidate" ]]; do
+        candidate="$dst_dir/$base_name-$n.$ext"
+        n=$((n + 1))
+    done
+    cp -f "$src" "$candidate"
+    echo "$candidate"
+}
+
+promote_qemu_disks() {
+    local stage_dir="$1"
+    local install_dir="$2"
+    local image_name="$3"
+    local -n out_paths_ref=$4
+
+    local image_base
+    image_base="$(sanitize_filename "$image_name")"
+
+    mapfile -t disk_files < <(find "$stage_dir" -type f \
+        \( -iname "*.qcow2" -o -iname "*.qcow" -o -iname "*.img" -o -iname "*.vmdk" -o -iname "*.vdi" -o -iname "*.raw" \) | sort)
+
+    if [[ "${#disk_files[@]}" -eq 0 ]]; then
+        warn "No QEMU disk files found after extraction."
+        return 1
+    fi
+
+    local idx=1
+    for f in "${disk_files[@]}"; do
+        local ext out
+        ext="${f##*.}"
+        if [[ "${#disk_files[@]}" -eq 1 ]]; then
+            out="$(copy_with_unique_name "$f" "$install_dir" "$image_base" "$ext")"
+        else
+            out="$(copy_with_unique_name "$f" "$install_dir" "$image_base-disk$idx" "$ext")"
+        fi
+        out_paths_ref+=("$out")
+        idx=$((idx + 1))
+    done
+}
+
 run_pull() {
     require_root
     ensure_index
@@ -311,50 +371,88 @@ run_pull() {
     prefix="$(jq -r --arg m "$mirror" '.url_properties.prefixes[$m]' "$INDEX_CACHE")"
     install_dir="$(install_dir_for_type "$type")"
 
-    if [[ -e "$install_dir/$name" && "$overwrite" != "--overwrite" ]]; then
-        err "Target already exists: $install_dir/$name (use --overwrite)"
-        exit 1
-    fi
-
     mkdir -p "$install_dir"
-    if [[ "$overwrite" == "--overwrite" ]]; then
-        rm -rf "$install_dir/$name"
-    fi
 
     log "${BLUE}[*] Pulling image:${NO_COLOR} $name"
     log "${BLUE}[*] Type:${NO_COLOR} $type"
     log "${BLUE}[*] Mirror:${NO_COLOR} $mirror ($hostname)"
     log "${BLUE}[*] Destination:${NO_COLOR} $install_dir"
 
+    local stage_dir
+    stage_dir="$(mktemp -d "$install_dir/.gns3-ipull-${type,,}-${image_id}-XXXXXX")"
+    local -a installed_paths=()
+
     while IFS= read -r rel_path; do
         [[ -z "$rel_path" || "$rel_path" == "null" ]] && continue
 
-        local url filename output
-        filename="$(basename "$rel_path")"
-        output="$install_dir/$filename"
+        local url raw_filename filename output
+        raw_filename="$(basename "$rel_path")"
+        filename="$(url_decode "$raw_filename")"
+        filename="$(sanitize_filename "$filename")"
+
+        if [[ "$filename" == *.md5sum ]]; then
+            warn "Skipping sidecar file: $filename"
+            continue
+        fi
+
+        output="$stage_dir/$filename"
         url="$protocol://$hostname$prefix$rel_path"
 
         log "${YELLOW}[-] Downloading:${NO_COLOR} $filename"
         curl -fL --retry 3 --retry-delay 2 -o "$output" "$url"
 
         local expected_size expected_sha1 expected_md5
-        expected_size="$(jq -r --arg fn "$filename" '.files[] | select(.filename == $fn) | .size' <<<"$image_data")"
-        expected_sha1="$(jq -r --arg fn "$filename" '.files[] | select(.filename == $fn) | .checksum.sha1' <<<"$image_data")"
-        expected_md5="$(jq -r --arg fn "$filename" '.files[] | select(.filename == $fn) | .checksum.md5' <<<"$image_data")"
+        expected_size="$(jq -r --arg p "$rel_path" '.files[] | select(.path == $p) | .size' <<<"$image_data")"
+        expected_sha1="$(jq -r --arg p "$rel_path" '.files[] | select(.path == $p) | .checksum.sha1' <<<"$image_data")"
+        expected_md5="$(jq -r --arg p "$rel_path" '.files[] | select(.path == $p) | .checksum.md5' <<<"$image_data")"
 
         verify_file "$output" "$expected_size" "$expected_sha1" "$expected_md5"
         ok "Verified: $filename"
 
         if [[ "$type" == "QEMU" ]]; then
-            extract_if_archive "$output" "$install_dir"
+            extract_if_archive "$output" "$stage_dir"
+        else
+            local final_name final_path
+            final_name="$filename"
+            if [[ "$overwrite" != "--overwrite" && -e "$install_dir/$final_name" ]]; then
+                err "Target already exists: $install_dir/$final_name (use --overwrite)"
+                rm -rf "$stage_dir"
+                exit 1
+            fi
+            final_path="$install_dir/$final_name"
+            mv -f "$output" "$final_path"
+            installed_paths+=("$final_path")
         fi
     done < <(jq -r '.files[].path' <<<"$image_data")
 
-    chown -R gns3:gns3 "$install_dir"
-    find "$install_dir" -type d -exec chmod 755 {} \;
-    find "$install_dir" -type f -exec chmod 644 {} \;
+    if [[ "$type" == "QEMU" ]]; then
+        if ! promote_qemu_disks "$stage_dir" "$install_dir" "$name" installed_paths; then
+            warn "QEMU image extracted, but no top-level disk image was installed."
+            warn "Check extracted files manually in: $stage_dir"
+        fi
+    fi
+
+    for p in "${installed_paths[@]}"; do
+        chown gns3:gns3 "$p"
+        chmod 644 "$p"
+    done
+    chown gns3:gns3 "$install_dir"
+    chmod 755 "$install_dir"
+    rm -rf "$stage_dir"
 
     ok "Installation complete: $name -> $install_dir"
+    if [[ "${#installed_paths[@]}" -gt 0 ]]; then
+        log "${BLUE}[*] Installed files:${NO_COLOR}"
+        for p in "${installed_paths[@]}"; do
+            log "  - $p"
+        done
+    else
+        warn "No installable payload files were produced."
+    fi
+
+    if [[ "$type" == "QEMU" ]]; then
+        warn "Use 'New Template -> QEMU VM' and select one of the installed top-level disk files."
+    fi
     warn "Docker images are not supported in v1."
 }
 
@@ -389,7 +487,7 @@ run_installed() {
 
 show_help() {
     cat <<'EOF'
-gns3-ipull v0.1.0
+gns3-ipull v0.1.1
 
 Usage:
   gns3-ipull search <type> [keyword]
@@ -412,6 +510,7 @@ Mapped destination paths:
 Notes:
   - Docker is intentionally out of scope in v1.
   - pull requires root.
+  - QEMU pulls are normalized to top-level disk images in /opt/gns3/images/QEMU.
   - Optional env vars: MIRROR, ROTATE=true, REPO_URL, INDEX_CACHE
 EOF
 }

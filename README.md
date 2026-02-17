@@ -26,6 +26,14 @@ v1 excludes:
 
 ## Install
 
+Install directly from GitHub using `wget`:
+
+```bash
+sudo wget -O /usr/local/bin/gns3-ipull "https://raw.githubusercontent.com/Khang-Phung-0812/gns3-ipull/main/gns3-ipull" && sudo chmod +x /usr/local/bin/gns3-ipull && gns3-ipull --help
+```
+
+Install from a local clone:
+
 ```bash
 sudo cp gns3-ipull /usr/local/bin/gns3-ipull
 sudo chmod +x /usr/local/bin/gns3-ipull
@@ -56,4 +64,7 @@ gns3-ipull installed all
 - `pull` requires root.
 - The tool fetches `labhub.json` from `ishare2-org/mirrors` latest release.
 - Integrity checks are performed (size, SHA1, MD5 where available).
+- URL-encoded filenames are decoded on install (for example `%5B` -> `[`).
+- `.md5sum` sidecar payload files are skipped.
+- QEMU pulls are normalized to top-level disk files in `/opt/gns3/images/QEMU` so they are visible in template creation.
 - Docker templates/images are intentionally out of scope in v1.
